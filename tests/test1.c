@@ -3,6 +3,8 @@
 #include <string.h>
 #include <signal.h>
 
+#include <hiredis/hiredis.h>
+
 #if defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
 #   include <sys/types.h>
 #   include <sys/wait.h>
@@ -263,6 +265,80 @@ cleanup:
     goto exit;
 }
 
+#ifndef ENUM_BEGIN
+#   define ENUM_BEGIN(name, type) \
+    static char const *get##name##String(type value) { \
+        char const *s = "<UNKNOWN>"; \
+        switch (value) {
+#   define ENUM_ITEM(item) \
+            case item: s = #item; break;
+#   define ENUM_END \
+            default: break; \
+        } \
+        return s; \
+    }
+#endif
+
+ENUM_BEGIN(RedisReplyType, int)
+    ENUM_ITEM(REDIS_REPLY_STRING)
+    ENUM_ITEM(REDIS_REPLY_ARRAY)
+    ENUM_ITEM(REDIS_REPLY_INTEGER)
+    ENUM_ITEM(REDIS_REPLY_NIL)
+    ENUM_ITEM(REDIS_REPLY_STATUS)
+    ENUM_ITEM(REDIS_REPLY_ERROR)
+ENUM_END
+
+static
+int check_redis_available(char const *ip, int port) {
+    int rc = 0;
+    redisContext *ctx = NULL;
+    redisReply *reply = NULL;
+    struct timeval tv;
+
+    tv.tv_sec = 2;
+
+    ctx = redisConnectWithTimeout("localhost", 8888, tv);
+    if (!ctx)
+        goto failure;
+    if (ctx->err != REDIS_OK) {
+        fprintf(stderr, "[redis] %s\n", &ctx->errstr[0]);
+        goto failure;
+    }
+    *(void**) &reply = redisCommand(ctx, "SET %s %s", "a", "a");
+    reply->type = REDIS_REPLY_STRING;
+    fprintf(stderr, "[redis] reply = %s (%s)\n",
+            getRedisReplyTypeString(reply->type),
+            reply->str);
+    freeReplyObject(reply); reply = NULL;
+
+    *(void**) &reply = redisCommand(ctx, "GET %s", "a");
+    fprintf(stderr, "[redis] reply = %s (%s)\n",
+            getRedisReplyTypeString(reply->type),
+            reply->str);
+    freeReplyObject(reply); reply = NULL;
+
+
+    goto success;
+exit:
+    return rc;
+success:
+    rc = 1;
+    goto cleanup;
+failure:
+    rc = 0;
+    goto cleanup;
+cleanup:
+    if (reply) {
+        freeReplyObject(reply);
+        reply = NULL;
+    }
+    if (ctx) {
+        redisFree(ctx);
+        ctx = NULL;
+    }
+    goto exit;
+}
+
 int main(int argc, char* *argv) {
     int rc = 0;
     pid_t pid = -1;
@@ -273,13 +349,13 @@ int main(int argc, char* *argv) {
     RedisBuilder *builder = RedisBuilder_create();
     if (!builder)
         goto failure;
-    builder->calls.optionNumber(builder, "port", 7275);
+    builder->calls.optionNumber(builder, "port", 8888);
 
-    pid = runChild(".", arguments, environments);
+    pid = runChild(arguments[0], arguments, environments);
     fprintf(stderr, "pid = %d\n", pid);
-    fprintf(stderr, "sleep(20) start...\n");
-    sleep(2);
-    fprintf(stderr, "sleep(20) stopped.\n");
+    sleep(1);
+    if (!check_redis_available("localhost", 8888))
+        goto failure;
 
     goto success;
 exit:

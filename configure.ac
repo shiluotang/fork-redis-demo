@@ -24,6 +24,7 @@ LT_INIT
 AC_CHECK_HEADERS([stdlib.h string.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
+PKG_CHECK_MODULES([HIREDIS], [hiredis])
 
 # Checks for library functions.
 
