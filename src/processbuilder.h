@@ -13,8 +13,8 @@ typedef struct tagProcessBuilder ProcessBuilder;
 
 struct tagProcess {
     struct {
-        int         (*wait0)    (Process*, int);
-        int         (*wait)     (Process*);
+        int         (*wait0)    (Process*, int, int*);
+        int         (*wait)     (Process*, int*);
         int         (*kill0)    (Process*, int);
         int         (*kill)     (Process*);
         int         (*getPID)   (Process const*);

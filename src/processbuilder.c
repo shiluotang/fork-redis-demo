@@ -11,6 +11,15 @@
 
 #include "processbuilder.h"
 
+extern char** environ;
+
+#ifndef LOGI
+#   define LOGI(fmt, ...)                                                      \
+    do {                                                                       \
+        fprintf(stderr, "[ProcessBuilder][I] " fmt "\n", ##__VA_ARGS__);        \
+    } while (0)
+#endif
+
 static
 int Process_getPID(Process const *me) {
     return me->data._M_pid;
@@ -25,13 +34,18 @@ Process* Process_setPID(Process *me, int value) {
 static
 int Process_kill0(Process *me, int sig) {
     int rc = 0;
+    int retcode = 0;
 
     if (me->data._M_pid < 0)
         goto success;
 
-    if (kill((pid_t) me->data._M_pid, sig) == -1)
+    retcode = kill((pid_t) me->data._M_pid, sig);
+    LOGI("kill(pid = %d, sig = %ld) = %d",
+            me->data._M_pid, (long) sig, retcode);
+    if (retcode == -1)
         goto failure;
-    me->data._M_pid = -1;
+    if (sig == SIGKILL)
+        me->data._M_pid = -1;
 
     goto success;
 exit:
@@ -52,36 +66,35 @@ int Process_kill(Process *me) {
 }
 
 static
-int Process_wait0(Process *me, int options) {
+int Process_wait0(Process *me, int options, int *exitcode) {
     int rc = 0;
-    int stat_loc = 0;
+    int status = 0;
     pid_t pid = -1;
 
     if (me->data._M_pid < 0)
         goto success;
 
     do {
-        pid = waitpid((pid_t) me->data._M_pid, &stat_loc, options);
+        pid = waitpid((pid_t) me->data._M_pid, &status, options);
+        LOGI("waitpid(pid = %d, status = %p (%d), options = %d) = %d",
+                (int) me->data._M_pid,
+                &status, status,
+                options,
+                pid);
         if ((int) pid == -1) {
             perror("waitpid");
             goto failure;
         }
-    } while (!WIFEXITED(stat_loc) && !WIFSIGNALED(stat_loc));
-#if 0
-    fprintf(stderr, "WIFEXITED(stat_loc) = %d\n", WIFEXITED(stat_loc));
-    if (WIFEXITED(stat_loc)) {
-        WEXITSTATUS(stat_loc);
-        fprintf(stderr, "exit status = %d\n", (int) WEXITSTATUS(stat_loc));
-    }
-    fprintf(stderr, "WIFSIGNALED(stat_loc) = %d\n", WIFSIGNALED(stat_loc));
-    fprintf(stderr, "waitpid(pid = %d, stat_loc = %p (%d), options = %d) = %d\n",
-            me->data._M_pid,
-            &stat_loc, stat_loc,
-            options,
-            pid
-            );
-#endif
-    me->data._M_pid = -1;
+    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+
+    if (!((options & WNOHANG) == WNOHANG && pid == 0)) {
+        if (WIFEXITED(status)) {
+            if (exitcode)
+                *exitcode = WEXITSTATUS(status);
+        }
+        me->data._M_pid = -1;
+    } else
+        goto failure;
 
     goto success;
 exit:
@@ -97,14 +110,15 @@ cleanup:
 }
 
 static
-int Process_wait(Process *me) {
-    return Process_wait0(me, WNOHANG);
+int Process_wait(Process *me, int *exitcode) {
+    /* wait until state change. */
+    return Process_wait0(me, 0, exitcode);
 }
 
 void Process_destroy(Process *me) {
     if (me) {
         me->calls.kill(me);
-        me->calls.wait(me);
+        me->calls.wait(me, NULL);
         free(me);
         me = NULL;
     }
@@ -355,8 +369,21 @@ static
 pid_t ProcessBuilder_runProcess(char const *pwd, char **args, char **envs) {
     pid_t pid = -1;
     int exitcode = 0;
+    char **p = NULL;
+    char* empty[] = { NULL };
 
-    /* TODO copy all the values */
+    /* eliminate NULL pointers which may failed on platforms other than linux */
+    args = args ? args : empty;
+    envs = envs ? envs : environ;
+    char cwd[FILENAME_MAX + 1];
+
+    if (!getcwd(&cwd[0], sizeof(cwd)))
+        goto failure;
+    LOGI("running %s in %s with options as following", args[0], pwd ? pwd : cwd);
+    for (p = args; *p; ++p)
+        LOGI("arguments[%d] = %s", (int) (p - args), *p);
+    for (p = envs; *p; ++p)
+        LOGI("environments[%d] = %s", (int) (p - envs), *p);
     pid = fork();
     if ((int) pid == 0) {
         /* running in child process */
@@ -386,7 +413,7 @@ success:
 failure:
     /* _exit(0) in child process? */
     if (pid == 0) {
-        fprintf(stderr, "exit from child process with status code 1\n");
+        LOGI("exit from child process with status code 1");
         exitcode = 1;
     }
     goto cleanup;
@@ -450,6 +477,10 @@ cleanup:
     if (process) {
         Process_destroy(process);
         process = NULL;
+    }
+    if (args) {
+        free(args);
+        args = NULL;
     }
     goto exit;
 }

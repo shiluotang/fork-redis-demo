@@ -6,7 +6,9 @@ AM_CXXFLAGS =
 AM_LDFLAGS 	=
 
 lib_LTLIBRARIES = libprocs.la
-libprocs_la_SOURCES = src/processbuilder.c
+libprocs_la_SOURCES = \
+src/processbuilder.c \
+src/redisserverbuilder.c
 
 check_PROGRAMS =
 
