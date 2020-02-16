@@ -67,12 +67,20 @@ int Process_wait0(Process *me, int options) {
             goto failure;
         }
     } while (!WIFEXITED(stat_loc) && !WIFSIGNALED(stat_loc));
+#if 0
+    fprintf(stderr, "WIFEXITED(stat_loc) = %d\n", WIFEXITED(stat_loc));
+    if (WIFEXITED(stat_loc)) {
+        WEXITSTATUS(stat_loc);
+        fprintf(stderr, "exit status = %d\n", (int) WEXITSTATUS(stat_loc));
+    }
+    fprintf(stderr, "WIFSIGNALED(stat_loc) = %d\n", WIFSIGNALED(stat_loc));
     fprintf(stderr, "waitpid(pid = %d, stat_loc = %p (%d), options = %d) = %d\n",
             me->data._M_pid,
             &stat_loc, stat_loc,
             options,
             pid
             );
+#endif
     me->data._M_pid = -1;
 
     goto success;
@@ -223,16 +231,17 @@ cleanup:
 static
 size_t ProcessBuilder_countof(char const **values) {
     size_t n = 0;
-    if (!values)
-        return n;
-    for (char const **p = values; *p; ++p)
-        ++n;
+    if (values) {
+        for (; *values; ++values)
+            ++n;
+    }
     return n;
 }
 
 static
 void ProcessBuilder_freeValues(char **values) {
-    for (char **p = values; *p; ++p)
+    char **p = NULL;
+    for (p = values; *p; ++p)
         free((void*) *p);
     free(values);
 }
